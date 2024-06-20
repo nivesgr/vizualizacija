@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stopa nezaposlenosti</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+            padding: 0;
+        }
+        #navbar {
+            width: 100%;
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 24px;
+        }
+        #content {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            height: 100vh;
+        }
+        #map-container {
+            width: 70%;
+            height: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .country {
+            stroke: #121212;
+            stroke-width: 0.5;
+            fill: #5e77c4;
+            cursor: pointer;
+        }
+        .country:hover {
+            fill: #ab14947b;
+        }
+        .selected {
+            fill: #ab14947b; 
+        }
+        #sidebar {
+            width: 30%;
+            height: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #country-info {
+            background-color: white;
+            padding: 5px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            width: 100%;
+            display: none;
+        }
+        #year-selector {
+            margin-bottom: 20px;
+            padding: 5px;
+            height: 40px;
+            width: 150px;
+        }
+        #bar-chart, #line-chart {
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+        .line {
+            fill: none;
+            stroke: steelblue;
+            stroke-width: 2;
+        }
+    </style>
+</head>
+<body>
+    <div id="navbar">Prikaz stope nezaposlenosti</div>
+    <div id="content">
+        <div id="map-container"></div>
+        <div id="sidebar">
+            <div id="country-info"></div>
+            <div id="year-selector">
+                <label for="year">Select Year: </label>
+                <select id="year"></select>
+            </div>
+            <div id="bar-chart"></div>
+            <div id="line-chart"></div>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+       
+        const width = document.getElementById('map-container').offsetWidth;
+        const height = 800;
+
+        // SVG
+        const svg = d3.select("#map-container")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        
+        const mapGroup = svg.append("g");
+
+        
+        const projection = d3.geoMercator()
+            .scale(130)
+            .translate([width / 2, height / 1.5]);
+
+        
+        const path = d3.geoPath().projection(projection);
+
+        // prikaz kaarte
+
+        d3.json("custom.geo.json")
+            .then(function(world) {
+                mapGroup.selectAll(".country")
+                    .data(world.features)
+                    .enter().append("path")
+                    .attr("class", "country")
+                    .attr("d", path)
+                    .on("click", displayInfo);
+            })
+            .catch(function(error){
+                console.error('Error loading the GeoJSON file:', error);
+            });
+
+        // JSON podaci o nezaposlenosti
+        let countryData;
+        d3.json("data.json").then(data => {
+            countryData = data;
+            console.log("JSON data loaded successfully:", data);
+            populateYearSelector();
+            drawBarChart();  
+        }).catch(error => {
+            console.error('Error loading the JSON file:', error);
+        });
+
+        // fix za razlicita imena drzave
+        const countryNameMapping = {
+            "Bosnia and Herz.": "Bosnia and Herzegovina",
+            "Russia": "Russian Federation",
+            "United States of America": "United States",
+            "Bahamas": "Bahamas, The",
+            "Dominican Rep.": "Dominican Republic",
+            "Venezuela": "Venezuela, RB",
+          
+        };
+
+        
+
+        function displayInfo(event, d) {
+            
+            d3.selectAll(".country").classed("selected", false);
+
+            d3.select(this).classed("selected", true);
+
+            let countryName = d.properties.name;
+            if (countryNameMapping[countryName]) {
+                countryName = countryNameMapping[countryName];
+            }
+            document.getElementById("country-info").innerText = countryName;
+            document.getElementById("country-info").style.display = "block";
+
+            
+            console.log(`Selected country: ${countryName}`);
+
+            const country = countryData.find(row => row['Country Name'] === countryName);
+            if (country) {
+                const years = Object.keys(country).filter(key => key.match(/^\d{4}$/));
+                const values = years.map(year => +country[year]);
+                console.log(`Data for ${countryName}:`, { years, values });
+
+                drawLineChart(years, values);
+            } else {
+                console.log(`No data found for ${countryName}`);
+                console.log(`Available countries in JSON: ${countryData.map(row => row['Country Name']).join(", ")}`);
+            }
+        }
+
+        // linijski
+        function drawLineChart(years, values) {
+            const margin = { top: 20, right: 20, bottom: 30, left: 50 },
+                  chartWidth = document.getElementById('line-chart').offsetWidth - margin.left - margin.right,
+                  chartHeight = 300 - margin.top - margin.bottom;
+
+            d3.select("#line-chart").selectAll("*").remove();
+
+            const svg = d3.select("#line-chart").append("svg")
+                .attr("width", chartWidth + margin.left + margin.right)
+                .attr("height", chartHeight + margin.top + margin.bottom)
+              .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleLinear().domain(d3.extent(years, d => +d)).range([0, chartWidth]);
+            const y = d3.scaleLinear().domain([0, d3.max(values)]).range([chartHeight, 0]);
+
+            const line = d3.line()
+                .x((d, i) => x(+years[i]))
+                .y(d => y(d));
+
+            svg.append("g")
+                .attr("class", "x axis")
+                .attr("transform", `translate(0,${chartHeight})`)
+                .call(d3.axisBottom(x).tickFormat(d3.format("d")));
+
+            svg.append("g")
+                .attr("class", "y axis")
+                .call(d3.axisLeft(y));
+
+            svg.append("path")
+                .datum(values)
+                .attr("class", "line")
+                .attr("d", line);
+
+            console.log("Line chart drawn for years:", years, "with values:", values);
+        }
+
+        // birac godine
+        function populateYearSelector() {
+            const years = Object.keys(countryData[0]).filter(key => key.match(/^\d{4}$/));
+            const yearSelector = d3.select("#year");
+
+            yearSelector.selectAll("option")
+                .data(years)
+                .enter()
+                .append("option")
+                .attr("value", d => d)
+                .text(d => d);
+
+            yearSelector.on("change", function(event) {
+                const selectedYear = event.target.value;
+                drawBarChart(selectedYear);
+            });
+
+            drawBarChart(years[0]);  
+        }
+
+        //  bar chart
+
+        function drawBarChart(year = "2023") {
+            const margin = { top: 20, right: 20, bottom: 30, left: 50 },
+                  chartWidth = document.getElementById('bar-chart').offsetWidth - margin.left - margin.right,
+                  chartHeight = 300 - margin.top - margin.bottom;
+
+            d3.select("#bar-chart").selectAll("*").remove();
+
+            const svg = d3.select("#bar-chart").append("svg")
+                .attr("width", chartWidth + margin.left + margin.right)
+                .attr("height", chartHeight + margin.top + margin.bottom)
+              .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // dohvat top 5 
+            const top5 = countryData
+                .filter(row => row[year] !== "")
+                .sort((a, b) => b[year] - a[year])
+                .slice(0, 5);
+
+            const x = d3.scaleBand()
+                .domain(top5.map(d => d["Country Name"]))
+                .range([0, chartWidth])
+                .padding(0.1);
+
+            const y = d3.scaleLinear()
+                .domain([0, d3.max(top5, d => +d[year])])
+                .nice()
+                .range([chartHeight, 0]);
+
+            svg.append("g")
+                .attr("class", "x axis")
+                .attr("transform", `translate(0,${chartHeight})`)
+                .call(d3.axisBottom(x));
+
+            svg.append("g")
+                .attr("class", "y axis")
+                .call(d3.axisLeft(y));
+
+            svg.selectAll(".bar")
+                .data(top5)
+                .enter().append("rect")
+                .attr("class", "bar")
+                .attr("x", d => x(d["Country Name"]))
+                .attr("y", d => y(d[year]))
+                .attr("width", x.bandwidth())
+                .attr("height", d => chartHeight - y(d[year]))
+                .attr("fill", "steelblue");
+
+            svg.selectAll(".label")
+                .data(top5)
+                .enter().append("text")
+                .attr("class", "label")
+                .attr("x", d => x(d["Country Name"]) + x.bandwidth() / 2)
+                .attr("y", d => y(d[year]) - 5)
+                .attr("text-anchor", "middle")
+                .text(d => d[year]);
+
+            console.log("Bar chart drawn for top 5 countries in year:", year);
+        }
+
+        // zoom
+        const zoom = d3.zoom()
+            .scaleExtent([1, 8])
+            .on("zoom", (event) => {
+                mapGroup.attr("transform", event.transform);
+            });
+
+        svg.call(zoom);
+    </script>
+</body>
+</html>
